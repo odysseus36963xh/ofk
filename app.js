@@ -1,191 +1,224 @@
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AI Spreadsheet</title>
+<link rel="icon" href="data:,">
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, Arial; margin: 0; padding: 15px; background: #0f172a; color: #e2e8f0; }
+  h1 { margin: 0 0 12px 0; text-align: center; }
 
-env.allowLocalModels = false;
+  .panel { background: #1e293b; padding: 10px 12px; border-radius: 10px; margin-bottom: 10px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  label { font-size: 13px; }
+  select, input[type=text], input[type=number], textarea {
+    padding: 6px 10px; border-radius: 6px; border: 1px solid #475569;
+    background: #0f172a; color: #e2e8f0; font-size: 14px;
+  }
+  textarea { width: 100%; min-height: 80px; font-family: monospace; }
+  button {
+    padding: 7px 13px; border-radius: 6px; border: none;
+    background: #2563eb; color: white; cursor: pointer; font-size: 14px;
+  }
+  button:hover:not(:disabled) { background: #1d4ed8; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.alt { background: #475569; }
+  button.danger { background: #dc2626; }
 
-// ============ SHEET CONFIG ============
-const NUM_ROWS = 20;
-const NUM_COLS = 6;  // A-F
-const COLS = Array.from({ length: NUM_COLS }, (_, i) => String.fromCharCode(65 + i));
+  #status {
+    margin-left: auto; font-size: 13px; color: #fbbf24;
+    padding: 6px 12px; background: #0f172a; border-radius: 6px;
+    border: 1px solid #334155; min-width: 220px; text-align: center;
+  }
 
-// ============ BUILD THE SHEET ============
-const sheet = document.getElementById('sheet');
+  #sheetWrap { overflow: auto; background: #1e293b; border-radius: 10px; padding: 5px; max-height: 65vh; }
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid #334155; padding: 0; min-width: 110px; height: 28px; font-size: 13px; }
+  th { background: #334155; text-align: center; font-weight: 600; }
+  th.row-head { background: #334155; min-width: 36px; width: 36px; text-align: center; }
+  td { background: #0f172a; padding: 4px 6px; color: #e2e8f0; outline: none; vertical-align: top; }
+  td:focus { background: #0c4a6e; outline: 2px solid #2563eb; }
+  td.processing { background: #78350f !important; }
+  .col-select {
+    width: 100%; padding: 2px; font-size: 11px; background: #1e293b;
+    color: #e2e8f0; border: 1px solid #475569; border-radius: 4px;
+  }
 
-// Header row
-let header = '<tr><th class="row-header"></th>';
-COLS.forEach(c => header += `<th>${c}</th>`);
-header += '</tr>';
-sheet.innerHTML = header;
+  details { background:#1e293b; padding: 8px 12px; border-radius:8px; margin-bottom: 10px; }
+  summary { cursor:pointer; font-weight: 600; }
+  .hint { font-size: 12px; color: #94a3b8; margin-top: 6px; }
+</style>
+</head>
+<body>
 
-// Data rows
-for (let r = 1; r <= NUM_ROWS; r++) {
-  let row = `<tr><td class="row-header">${r}</td>`;
-  COLS.forEach(c => {
-    row += `<td><input id="cell-${c}${r}" type="text"></td>`;
-  });
-  row += '</tr>';
-  sheet.insertAdjacentHTML('beforeend', row);
-}
+<h1>📊 AI Spreadsheet</h1>
 
-// ============ CELL HELPERS ============
-function getCell(col, row) {
-  const el = document.getElementById(`cell-${col}${row}`);
-  return el ? el.value : '';
-}
-function setCell(col, row, value) {
-  const el = document.getElementById(`cell-${col}${row}`);
-  if (el) el.value = value;
-}
+<!-- AI TOOLBAR -->
+<div class="panel">
+  <div class="row">
+    <b>🌍 Translate:</b>
+    <label>From col</label>
+    <select id="fromCol"></select>
+    <span>→</span>
+    <label>To col</label>
+    <select id="toCol"></select>
+    <button id="btnTranslate" disabled>Translate ▶</button>
+    <span class="hint">(reads language from each column's selector row)</span>
+    <span id="status">⏳ Loading AI...</span>
+  </div>
+</div>
 
-// ============ STATUS HELPER ============
-const statusEl = document.getElementById('status');
-function setStatus(msg) { statusEl.textContent = msg; }
+<div class="panel">
+  <div class="row">
+    <b>🛠️ Tools:</b>
+    <label>From</label>
+    <select id="toolFrom"></select>
+    <label>→ To</label>
+    <select id="toolTo"></select>
+    <button id="btnSummarize" disabled>📝 Summarize</button>
+    <button id="btnGrammar" disabled>✍️ Grammar</button>
+    <button id="btnSentiment" disabled>😊 Sentiment</button>
+    <button id="btnUpper" class="alt">UPPER</button>
+    <button id="btnLower" class="alt">lower</button>
+    <button id="btnStop" class="danger" style="display:none">⏹ Stop</button>
+  </div>
+</div>
 
-// ============ LOAD AI MODEL ============
-let ai;
-setStatus('⏳ Downloading AI model (~250MB)...');
-try {
-  ai = await pipeline('text2text-generation', 'Xenova/LaMini-Flan-T5-248M', {
-    progress_callback: (p) => {
-      if (p.status === 'progress' && p.file?.endsWith('.onnx')) {
-        setStatus(`⏳ Loading model: ${Math.round(p.progress || 0)}%`);
+<!-- UPLOAD / UTILITIES -->
+<details>
+  <summary>📥 Upload data / 🗑️ Clear</summary>
+  <div class="row" style="margin-top:8px;">
+    <button onclick="toggleUpload()">Paste column data</button>
+    <button id="btnSample" class="alt">Load sample (Spanish in A)</button>
+    <button id="btnClear" class="danger">Clear sheet</button>
+  </div>
+  <div id="uploadBox" style="display:none; margin-top:10px;">
+    <label>Paste lines (one per row) into column:</label>
+    <select id="columnSelect"></select>
+    <textarea id="columnData" placeholder="hola&#10;buenos días&#10;el perro come"></textarea>
+    <button onclick="uploadColumn()">Upload</button>
+  </div>
+</details>
+
+<!-- THE SHEET -->
+<div id="sheetWrap">
+  <table id="sheet"></table>
+</div>
+
+<!-- YOUR SHEET SCRIPT (kept intact, minor tweaks for AI dropdown sync) -->
+<script>
+  const TOTAL_COLS = 26;
+  let totalRows = 26;
+
+  const sheetTable = document.getElementById("sheet");
+  const colSelectMap = {};
+  for (let i = 0; i < 26; i++) colSelectMap[i] = String.fromCharCode(65 + i);
+
+  // Header row (letters)
+  let headerRow = "<tr><th></th>";
+  for(let c=0; c<TOTAL_COLS; c++) headerRow += `<th>${colSelectMap[c]}</th>`;
+  headerRow += "</tr>";
+
+  // Language selector row
+  let selRow = "<tr><th></th>";
+  for(let c=0; c<TOTAL_COLS; c++) {
+    selRow += `<th><select class='col-select'><option>Off</option><option>EN</option><option>IT</option><option>ES</option><option>FR</option><option>DE</option><option>PT</option><option>NL</option></select></th>`;
+  }
+  selRow += "</tr>";
+
+  const staticCells = Array(TOTAL_COLS).fill('<td contenteditable="true"></td>').join("");
+
+  let bodyHtml = "";
+  for(let r=1; r<=totalRows; r++){
+    bodyHtml += `<tr><th class="row-head">${r}</th>${staticCells}</tr>`;
+  }
+  sheetTable.innerHTML = headerRow + selRow + bodyHtml;
+
+  function addNewRows(count) {
+    if(count <= 0) return;
+    let htmlBuffer = "";
+    for(let i=0; i<count; i++){
+      totalRows++;
+      htmlBuffer += `<tr><th class="row-head">${totalRows}</th>${staticCells}</tr>`;
+    }
+    sheetTable.insertAdjacentHTML('beforeend', htmlBuffer);
+  }
+
+  // Tab navigation
+  sheetTable.addEventListener('keydown', (e) => {
+    const target = e.target;
+    if(target.tagName.toLowerCase() !== 'td') return;
+    if(e.key === 'Tab') {
+      e.preventDefault();
+      const tdIndex = Array.from(target.parentElement.children).indexOf(target);
+      const rowIndex = Array.from(sheetTable.querySelectorAll('tr')).indexOf(target.parentElement);
+      let nextTd;
+      if(tdIndex === TOTAL_COLS) {
+        if(rowIndex === sheetTable.rows.length - 1) {
+          addNewRows(1);
+          const newRow = sheetTable.rows[sheetTable.rows.length - 1];
+          nextTd = newRow.cells[1];
+        } else {
+          nextTd = sheetTable.rows[rowIndex + 1].cells[1];
+        }
+      } else {
+        nextTd = target.nextElementSibling;
+      }
+      if(nextTd && nextTd.tagName.toLowerCase() === 'td') {
+        nextTd.focus();
+        placeCaretAtEnd(nextTd);
       }
     }
   });
-  setStatus('✅ AI ready!');
-  ['btnTranslate', 'btnSummarize', 'btnGrammar', 'btnSentiment', 'btnRunCmd']
-    .forEach(id => document.getElementById(id).disabled = false);
-} catch (err) {
-  setStatus('❌ AI failed to load: ' + err.message);
-  console.error(err);
-}
 
-// ============ CORE: APPLY AI TO A COLUMN ============
-async function processColumn(fromCol, toCol, makePrompt, label) {
-  fromCol = fromCol.toUpperCase();
-  toCol = toCol.toUpperCase();
-  if (!COLS.includes(fromCol) || !COLS.includes(toCol)) {
-    setStatus(`❌ Invalid columns. Use A-${COLS[COLS.length - 1]}`);
-    return;
+  function placeCaretAtEnd(el) {
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
   }
 
-  let count = 0;
-  for (let r = 1; r <= NUM_ROWS; r++) {
-    const text = getCell(fromCol, r).trim();
-    if (!text) continue;
-
-    setStatus(`${label}: row ${r}...`);
-    setCell(toCol, r, '...');
-    try {
-      const out = await ai(makePrompt(text), { max_new_tokens: 120, temperature: 0.3 });
-      setCell(toCol, r, out[0].generated_text);
-      count++;
-    } catch (e) {
-      setCell(toCol, r, '⚠️ error');
+  // Upload column (paste lines into a column)
+  window.uploadColumn = function() {
+    const rawText = document.getElementById("columnData").value;
+    const colIndexInput = parseInt(document.getElementById("columnSelect").value);
+    if(!rawText.trim()) return alert("Please paste some text.");
+    const lines = rawText.split(/\r?\n/);
+    const currentDataRows = sheetTable.rows.length - 2;
+    if(lines.length > currentDataRows) addNewRows(lines.length - currentDataRows);
+    const allRows = sheetTable.rows;
+    for(let i = 0; i < lines.length; i++) {
+      if(allRows[i+2]) {
+        const td = allRows[i+2].cells[colIndexInput + 1];
+        if(td) td.innerText = lines[i];
+      }
     }
-  }
-  setStatus(`✅ ${label} done (${count} cells)`);
-}
-
-// ============ BUTTON ACTIONS ============
-document.getElementById('btnTranslate').onclick = () => {
-  const lang = document.getElementById('lang').value;
-  processColumn(
-    document.getElementById('fromCol').value,
-    document.getElementById('toCol').value,
-    (text) => `Translate the following text to ${lang}: ${text}`,
-    `Translate→${lang}`
-  );
-};
-
-document.getElementById('btnSummarize').onclick = () => {
-  processColumn(
-    document.getElementById('fromCol').value,
-    document.getElementById('toCol').value,
-    (text) => `Summarize in one short sentence: ${text}`,
-    'Summarize'
-  );
-};
-
-document.getElementById('btnGrammar').onclick = () => {
-  processColumn(
-    document.getElementById('fromCol').value,
-    document.getElementById('toCol').value,
-    (text) => `Fix the grammar and spelling: ${text}`,
-    'Grammar'
-  );
-};
-
-document.getElementById('btnSentiment').onclick = () => {
-  processColumn(
-    document.getElementById('fromCol').value,
-    document.getElementById('toCol').value,
-    (text) => `Is the sentiment of this text positive, negative, or neutral? Answer with one word. Text: ${text}`,
-    'Sentiment'
-  );
-};
-
-document.getElementById('btnClear').onclick = () => {
-  if (!confirm('Clear all cells?')) return;
-  COLS.forEach(c => {
-    for (let r = 1; r <= NUM_ROWS; r++) setCell(c, r, '');
-  });
-  setStatus('Sheet cleared');
-};
-
-// ============ COMMAND PARSER ============
-function parseCommand(cmd) {
-  cmd = cmd.toLowerCase().trim();
-
-  // translate X to Y [in LANGUAGE]
-  let m = cmd.match(/^translate\s+(\w)\s+to\s+(\w)(?:\s+in\s+(\w+))?/);
-  if (m) {
-    const lang = m[3] ? m[3].charAt(0).toUpperCase() + m[3].slice(1) : 'Spanish';
-    return {
-      from: m[1], to: m[2],
-      prompt: (t) => `Translate to ${lang}: ${t}`,
-      label: `Translate→${lang}`
-    };
-  }
-
-  // summarize X to Y
-  m = cmd.match(/^summari[sz]e\s+(\w)\s+to\s+(\w)/);
-  if (m) return {
-    from: m[1], to: m[2],
-    prompt: (t) => `Summarize in one short sentence: ${t}`,
-    label: 'Summarize'
+    document.getElementById("uploadBox").style.display = "none";
   };
 
-  // grammar X to Y
-  m = cmd.match(/^(?:grammar|fix)\s+(\w)\s+to\s+(\w)/);
-  if (m) return {
-    from: m[1], to: m[2],
-    prompt: (t) => `Fix the grammar and spelling: ${t}`,
-    label: 'Grammar'
+  window.toggleUpload = () => {
+    const box = document.getElementById("uploadBox");
+    box.style.display = box.style.display === "none" || box.style.display === "" ? "block" : "none";
   };
 
-  // sentiment X to Y
-  m = cmd.match(/^sentiment\s+(\w)\s+to\s+(\w)/);
-  if (m) return {
-    from: m[1], to: m[2],
-    prompt: (t) => `Is this positive, negative, or neutral? One word answer. Text: ${t}`,
-    label: 'Sentiment'
-  };
-
-  return null;
-}
-
-document.getElementById('btnRunCmd').onclick = runCommand;
-document.getElementById('commandBox').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') runCommand();
-});
-
-async function runCommand() {
-  const cmd = document.getElementById('commandBox').value.trim();
-  if (!cmd) return;
-  const parsed = parseCommand(cmd);
-  if (!parsed) {
-    setStatus('❌ Unknown command. Try: translate A to B in French');
-    return;
+  // Populate column dropdowns (used by AI + upload)
+  function populateColDropdowns() {
+    const opts = Array.from({length: TOTAL_COLS}, (_, i) => `<option value="${i}">${colSelectMap[i]}</option>`).join('');
+    ['fromCol','toCol','toolFrom','toolTo','columnSelect'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = opts;
+    });
+    document.getElementById('toCol').value = 1;
+    document.getElementById('toolTo').value = 1;
   }
-  await processColumn(parsed.from, parsed.to, parsed.prompt, parsed.label);
-}
+  populateColDropdowns();
+</script>
+
+<!-- AI SCRIPT (separate module) -->
+<script type="module" src="./app.js"></script>
+</body>
+</html>
