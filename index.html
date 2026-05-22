@@ -184,9 +184,150 @@
   <button id="btnRunCmd" disabled>▶ Run</button>
 </div>
 
-<div class="sheet-wrap">
+<div id="sheetWrap">
   <table id="sheet"></table>
 </div>
+
+<script>
+  // --- CONFIGURATION ---
+  const TOTAL_COLS = 26;
+  let totalRows = 26; // STARTS EXACTLY AT 26
+  
+  const sheetTable = document.getElementById("sheet");
+  const colSelectMap = { 0:'A', 1:'B', 2:'C', 3:'D', 4:'E', 5:'F', 6:'G', 7:'H', 8:'I', 9:'J', 10:'K', 11:'L', 12:'M', 13:'N', 14:'O', 15:'P', 16:'Q', 17:'R', 18:'S', 19:'T', 20:'U', 21:'V', 22:'W', 23:'X', 24:'Y', 25:'Z' };
+
+  // --- 1. INITIAL RENDER (Fast & Static) ---
+  // Generate Header (Letters A-Z)
+  let headerRow = "<tr><th></th>";
+  for(let c=0; c<TOTAL_COLS; c++) headerRow += `<th>${colSelectMap[c]}</th>`;
+  headerRow += "</tr>";
+
+  // Generate Selector Row (Languages)
+  let selRow = "<tr><th></th>";
+  for(let c=0; c<TOTAL_COLS; c++) {
+    selRow += `<th><select class='col-select'><option>Off</option><option>EN</option><option>IT</option><option>ES</option><option>FR</option><option>DE</option></select></th>`;
+  }
+  selRow += "</tr>";
+
+  // Cache the static cells HTML for reuse
+  const staticCells = Array(TOTAL_COLS).fill('<td contenteditable="true"></td>').join("");
+
+  // Build Body (Exactly 26 Rows)
+  let bodyHtml = "";
+  for(let r=1; r<=totalRows; r++){
+    bodyHtml += `<tr><th class="row-head">${r}</th>${staticCells}</tr>`;
+  }
+
+  sheetTable.innerHTML = headerRow + selRow + bodyHtml;
+
+
+  // --- 2. SMART EXPANSION LOGIC ---
+  
+  // Function to add N new rows at the bottom quickly
+  function addNewRows(count) {
+    if(count <= 0) return;
+    let htmlBuffer = "";
+    for(let i=0; i<count; i++){
+      totalRows++;
+      htmlBuffer += `<tr><th class="row-head">${totalRows}</th>${staticCells}</tr>`;
+    }
+    sheetTable.insertAdjacentHTML('beforeend', htmlBuffer);
+  }
+
+  // --- 3. TAB NAVIGATION HANDLER ---
+  sheetTable.addEventListener('keydown', (e) => {
+    const target = e.target;
+    
+    // ONLY INTERCEPT IF INSIDE A DATA CELL (<td>)
+    if(target.tagName.toLowerCase() !== 'td') return;
+
+    if(e.key === 'Tab') {
+      e.preventDefault(); // Stop default focus jump
+      
+      // Get current cell info
+      const tdIndex = Array.from(target.parentElement.children).indexOf(target);
+      const rowIndex = Array.from(sheetTable.querySelectorAll('tr')).indexOf(target.parentElement);
+
+      // Determine Next Cell
+      let nextTd;
+      
+      // Is it the last column (Z)?
+      if(tdIndex === TOTAL_COLS) { 
+        // Check if it is the very last row of the whole table
+        if(rowIndex === sheetTable.rows.length - 1) {
+          // EXPAND: Create new row
+          addNewRows(1);
+          // Move focus to first cell of new row
+          const newRow = sheetTable.rows[sheetTable.rows.length - 1];
+          nextTd = newRow.cells[1]; // Index 0 is row number, 1 is Column A
+        } else {
+          // Move to first cell of NEXT row
+          const nextRow = sheetTable.rows[rowIndex + 1];
+          nextTd = nextRow.cells[1];
+        }
+      } else {
+        // Same row, next column
+        nextTd = target.nextElementSibling;
+      }
+
+      if(nextTd && nextTd.tagName.toLowerCase() === 'td') {
+        nextTd.focus();
+        // Place cursor at end of content
+        placeCaretAtEnd(nextTd);
+      }
+    }
+  });
+
+  // Helper for caret position
+  function placeCaretAtEnd(el) {
+    el.focus();
+    var range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+
+  // --- 4. COLUMN UPLOAD LOGIC ---
+  window.uploadColumn = function() {
+    const rawText = document.getElementById("columnData").value;
+    const colIndexInput = parseInt(document.getElementById("columnSelect").value);
+    
+    if(!rawText.trim()) return alert("Please paste some text.");
+
+    const lines = rawText.split(/\r?\n/);
+    
+    // Check if we need more rows
+    const currentDataRows = sheetTable.rows.length - 2; // Minus header rows
+    if(lines.length > currentDataRows) {
+      const missingRows = lines.length - currentDataRows;
+      console.log(`Auto-expanding ${missingRows} rows...`);
+      addNewRows(missingRows);
+    }
+
+    // Clear target column first? Optional. Let's fill.
+    const allRows = sheetTable.rows;
+    
+    // Fill Data (Start at index 2 because 0 is letters, 1 is language selectors)
+    for(let i = 0; i < lines.length; i++) {
+      if(allRows[i+2]) { // Check if row exists
+        const td = allRows[i+2].cells[colIndexInput + 1]; // +1 because index 0 is row number
+        if(td) td.innerText = lines[i];
+      }
+    }
+
+    // Hide UI feedback
+    document.getElementById("uploadBox").style.display = "none";
+  };
+
+  // Helper functions for buttons (Toggle visibility)
+  window.toggleUpload = () => {
+    const box = document.getElementById("uploadBox");
+    box.style.display = box.style.display === "none" || box.style.display === "" ? "block" : "none";
+  };
+</script>
 
 <div class="hints">
   💡 <b>Tips:</b>
