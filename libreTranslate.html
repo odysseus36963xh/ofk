@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Simple Translator</title>
+  <style>
+    body { font-family: Arial; max-width: 800px; margin: 50px auto; padding: 20px; }
+    textarea { width: 100%; height: 150px; margin: 10px 0; font-size: 16px; }
+    button { padding: 15px 30px; font-size: 18px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 5px; }
+    select { padding: 10px; font-size: 16px; }
+    .row { display: flex; gap: 20px; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h1>🌍 Simple Translator</h1>
+  
+  <div class="row">
+    <select id="fromLang">
+      <option value="es">Spanish</option>
+      <option value="en">English</option>
+      <option value="fr">French</option>
+      <option value="de">German</option>
+      <option value="it">Italian</option>
+      <option value="pt">Portuguese</option>
+    </select>
+    <span>→</span>
+    <select id="toLang">
+      <option value="en">English</option>
+      <option value="es">Spanish</option>
+      <option value="fr">French</option>
+      <option value="de">German</option>
+      <option value="it">Italian</option>
+      <option value="pt">Portuguese</option>
+    </select>
+  </div>
+
+  <textarea id="input" placeholder="Type or paste text here..."></textarea>
+  <button onclick="translate()">Translate</button>
+  <textarea id="output" placeholder="Translation appears here..." readonly></textarea>
+
+  <script>
+    async function translate() {
+      const text = document.getElementById('input').value;
+      const from = document.getElementById('fromLang').value;
+      const to = document.getElementById('toLang').value;
+      
+      document.getElementById('output').value = 'Translating...';
+      
+      try {
+        // Free LibreTranslate API (no key needed)
+        const res = await fetch('https://libretranslate.com/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ q: text, source: from, target: to })
+        });
+        const data = await res.json();
+        document.getElementById('output').value = data.translatedText;
+      } catch (e) {
+        document.getElementById('output').value = 'Error: ' + e.message;
+      }
+    }
+  </script>
+</body>
+</html>
